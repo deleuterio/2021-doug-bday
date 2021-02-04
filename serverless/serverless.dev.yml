@@ -1,0 +1,86 @@
+service: rifacafol-dev
+plugins:
+  - serverless-dotenv-plugin
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: dev
+  region: us-east-1
+  apiName: rifas # Use a custom name for the API Gateway API
+  memorySize: 128 # Overwrite the default memory size. Default is 1024
+  timeout: 30 # The default is 6 seconds. Note: API Gateway current maximum is 30 seconds
+  deploymentBucket:
+    name: com.serverless.us-east-1.rifacafol-dev.deploys
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "s3:PutObject"
+        - "s3:HeadObject"
+        - "s3:GetObject"
+        - "s3:ListBucket"
+      Resource:
+        - "arn:aws:s3:::rifa-datalake-raw-dev"
+        - "arn:aws:s3:::rifa-datalake-raw-dev/*"
+    - Effect: Allow
+      Action:
+        - "sqs:DeleteMessage"
+        - "sqs:GetQueueAttributes"
+        - "sqs:ReceiveMessage"
+        - "sqs:SendMessage"
+      Resource:
+        - "arn:aws:sqs:us-east-1:113779569966:RafflePaymentSuccessDev"
+        - "arn:aws:sqs:us-east-1:113779569966:RafflePaymentSuccessDevDLT"
+    - Effect: Allow
+      Action:
+        - "ses:SendTemplatedEmail"
+        - "ses:SendRawEmail"
+      Resource: "arn:aws:ses:us-east-1:113779569966:identity/*"
+
+functions:
+  app:
+    handler: index.handler
+    layers:
+      - { Ref: DependenciesLambdaLayer }
+    events:
+      - http: ANY /
+      - http: "ANY {proxy+}"
+  raffle-processor:
+    handler: index.processor
+    layers:
+      - { Ref: DependenciesLambdaLayer }
+    timeout: 300 # 5 minutes
+    events:
+      - sqs:
+          batchSize: 1
+          arn:
+            Fn::GetAtt:
+              - RafflePaymentSuccessDev
+              - Arn
+
+resources:
+  Resources:
+    RafflePaymentSuccessDev:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: "RafflePaymentSuccessDev"
+    RafflePaymentSuccessDevDLT:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: "RafflePaymentSuccessDevDLT"
+
+package:
+  exclude:
+    - node_modules/**
+    - .env.*
+    - .env
+    - lambda/dependencies-layer/**
+
+layers:
+  Dependencies:
+    package:
+      artifact: ./lambda/dependencies-layer/nodejs.zip
+
+custom:
+  dotenv:
+    path: ./.env.development
